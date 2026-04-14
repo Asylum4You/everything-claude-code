@@ -2,8 +2,8 @@
   "name": "@ecc/claude-orchestrator",
   "version": "1.0.0",
   "description": "Claude orchestrator agent for task lifecycle management, context optimization, and tool coordination",
-  "main": "index.ts",
-  "types": "index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "jest",
