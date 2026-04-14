@@ -218,8 +218,8 @@ export abstract class BaseEmailService implements EmailService {
 
   constructor(config: EmailProviderConfig) {
     this.config = config
-    this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...config.retries }
-    this.loggingConfig = { ...DEFAULT_LOGGING_CONFIG, ...config.enableLogging }
+    this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...(config.retryConfig ?? {}) }
+    this.loggingConfig = { ...DEFAULT_LOGGING_CONFIG, ...(config.loggingConfig ?? {}) }
     this.logger = new EmailLogger(this.loggingConfig)
   }
 
