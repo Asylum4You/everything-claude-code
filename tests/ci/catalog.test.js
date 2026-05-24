@@ -44,6 +44,8 @@ function writeEnglishReadme(root, counts, options = {}) {
   const unrelatedSkillsCount = options.unrelatedSkillsCount || 16;
 
   fs.writeFileSync(path.join(root, 'README.md'), `Access to ${counts.agents} agents, ${counts.skills} skills, and ${counts.commands} commands.
+- **Public surface synced to the live repo** - metadata, catalog counts, plugin manifests, and install-facing docs now match the actual OSS surface: ${counts.agents} agents, ${counts.skills} skills, and ${counts.commands} legacy command shims.
+|-- agents/           # ${counts.agents} specialized subagents for delegation
 | Feature | Claude Code | Cursor IDE | Codex CLI | OpenCode |
 | --- | --- | --- | --- | --- |
 | Agents | PASS: ${tableCounts.agents} agents |
@@ -62,6 +64,22 @@ function writeEnglishReadme(root, counts, options = {}) {
 | **Commands** | ${parityCounts.commands} | Shared | Instruction-based | 31 |
 | **Skills** | ${parityCounts.skills} | Shared | 10 (native format) | 37 |
 `);
+}
+
+function writePluginMetadata(root, counts) {
+  const pluginDir = path.join(root, '.claude-plugin');
+  fs.mkdirSync(pluginDir, { recursive: true });
+
+  fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({
+    name: 'ecc',
+    description: `Fixture plugin — ${counts.agents} agents, ${counts.skills} skills, ${counts.commands} legacy command shims`,
+  }, null, 2));
+  fs.writeFileSync(path.join(pluginDir, 'marketplace.json'), JSON.stringify({
+    plugins: [{
+      name: 'ecc',
+      description: `Fixture marketplace plugin — ${counts.agents} agents, ${counts.skills} skills, ${counts.commands} legacy command shims`,
+    }],
+  }, null, 2));
 }
 
 function writeEnglishAgents(root, counts, options = {}) {
@@ -143,6 +161,7 @@ function writeCatalogFixture(root, options = {}) {
   writeZhRootReadme(root, documentedCounts);
   writeZhDocsReadme(root, documentedCounts, { unrelatedSkillsCount });
   writeZhAgents(root, documentedCounts, { skillsMinimum });
+  writePluginMetadata(root, documentedCounts);
 }
 
 function test(name, fn) {
@@ -203,7 +222,11 @@ function runTests() {
         .join('\n');
 
       assert.ok(formatted.includes('README.md quick-start summary'));
+      assert.ok(formatted.includes('README.md rc.1 release-note summary'));
+      assert.ok(formatted.includes('README.md project tree'));
       assert.ok(formatted.includes('AGENTS.md summary'));
+      assert.ok(formatted.includes('.claude-plugin/plugin.json description'));
+      assert.ok(formatted.includes('.claude-plugin/marketplace.json plugin description'));
       assert.ok(formatted.includes('README.zh-CN.md quick-start summary'));
       assert.ok(formatted.includes('docs/zh-CN/README.md parity table'));
       assert.ok(formatted.includes('docs/zh-CN/AGENTS.md project structure'));
@@ -230,14 +253,20 @@ function runTests() {
       const agentsDoc = fs.readFileSync(path.join(testDir, 'AGENTS.md'), 'utf8');
       const zhReadme = fs.readFileSync(path.join(testDir, 'docs', 'zh-CN', 'README.md'), 'utf8');
       const zhAgentsDoc = fs.readFileSync(path.join(testDir, 'docs', 'zh-CN', 'AGENTS.md'), 'utf8');
+      const pluginJson = fs.readFileSync(path.join(testDir, '.claude-plugin', 'plugin.json'), 'utf8');
+      const marketplaceJson = fs.readFileSync(path.join(testDir, '.claude-plugin', 'marketplace.json'), 'utf8');
 
       assert.ok(readme.includes('Access to 1 agents, 1 skills, and 1 legacy command shims'));
+      assert.ok(readme.includes('actual OSS surface: 1 agents, 1 skills, and 1 legacy command shims'));
+      assert.ok(readme.includes('|-- agents/           # 1 specialized subagents for delegation'));
       assert.ok(readme.includes('| Skills | 42 | .agents/skills/ |'));
       assert.ok(agentsDoc.includes('providing 1 specialized agents, 1+ skills, 1 commands'));
       assert.ok(agentsDoc.includes('skills/ - 1+ workflow skills and domain knowledge'));
       assert.ok(zhReadme.includes('| 技能 | 42 | .agents/skills/ |'));
       assert.ok(zhAgentsDoc.includes('提供 1 个专业代理、1+ 项技能、1 条命令'));
       assert.ok(zhAgentsDoc.includes('skills/ - 1+ 个工作流技能和领域知识'));
+      assert.ok(pluginJson.includes('1 agents, 1 skills, 1 legacy command shims'));
+      assert.ok(marketplaceJson.includes('1 agents, 1 skills, 1 legacy command shims'));
     } finally {
       cleanupTestDir(testDir);
     }

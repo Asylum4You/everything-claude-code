@@ -128,7 +128,10 @@ function waitForFile(filePath, timeoutMs = 5000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf8');
+      const content = fs.readFileSync(filePath, 'utf8');
+      if (content.trim()) {
+        return content;
+      }
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
@@ -565,7 +568,7 @@ async function runTests() {
           CLAUDE_HOOK_EVENT_NAME: 'PreToolUse',
           ECC_MCP_CONFIG_PATH: configPath,
           ECC_MCP_HEALTH_STATE_PATH: statePath,
-          ECC_MCP_HEALTH_TIMEOUT_MS: '100'
+          ECC_MCP_HEALTH_TIMEOUT_MS: '1000'
         }
       );
 
@@ -948,6 +951,172 @@ async function runTests() {
       assert.strictEqual(state.servers.atlassian.status, 'healthy', 'Expected OAuth-protected HTTP MCP server to be marked healthy');
     } finally {
       serverProcess.kill('SIGTERM');
+      cleanupTempDir(tempDir);
+    }
+  })) passed++; else failed++;
+
+  if (await asyncTest('treats HTTP 406 probe responses as healthy reachable Streamable HTTP MCP servers', async () => {
+    const tempDir = createTempDir();
+    const configPath = path.join(tempDir, 'claude.json');
+    const statePath = path.join(tempDir, 'mcp-health.json');
+    const serverScript = path.join(tempDir, 'http-406-server.js');
+    const portFile = path.join(tempDir, 'server-port.txt');
+
+    fs.writeFileSync(
+      serverScript,
+      [
+        "const fs = require('fs');",
+        "const http = require('http');",
+        "const portFile = process.argv[2];",
+        "const server = http.createServer((req, res) => {",
+        "  if (String(req.headers.accept || '').includes('text/event-stream')) {",
+        "    res.writeHead(200, { 'Content-Type': 'text/event-stream' });",
+        "    res.end();",
+        "    return;",
+        "  }",
+        "  res.writeHead(406, { 'Content-Type': 'application/json' });",
+        "  res.end(JSON.stringify({ error: 'missing Accept: text/event-stream' }));",
+        "});",
+        "server.listen(0, '127.0.0.1', () => {",
+        "  fs.writeFileSync(portFile, String(server.address().port));",
+        "});",
+        "setInterval(() => {}, 1000);"
+      ].join('\n')
+    );
+
+    const serverProcess = spawn(process.execPath, [serverScript, portFile], {
+      stdio: 'ignore'
+    });
+
+    try {
+      const port = waitForFile(portFile).trim();
+      await waitForHttpReady(`http://127.0.0.1:${port}/mcp`);
+
+      writeConfig(configPath, {
+        mcpServers: {
+          streamable: {
+            type: 'http',
+            url: `http://127.0.0.1:${port}/mcp`
+          }
+        }
+      });
+
+      const input = { tool_name: 'mcp__streamable__initialize', tool_input: {} };
+      const result = runHook(input, {
+        CLAUDE_HOOK_EVENT_NAME: 'PreToolUse',
+        ECC_MCP_CONFIG_PATH: configPath,
+        ECC_MCP_HEALTH_STATE_PATH: statePath,
+        ECC_MCP_HEALTH_TIMEOUT_MS: '2000'
+      });
+
+      assert.strictEqual(
+        result.code,
+        0,
+        `Expected HTTP 406 probe to be treated as healthy: ${hookFailureDetails(result, statePath)}`
+      );
+      assert.strictEqual(result.stdout.trim(), JSON.stringify(input), 'Expected original JSON on stdout');
+
+      const state = readState(statePath);
+      assert.strictEqual(state.servers.streamable.status, 'healthy', 'Expected Streamable HTTP MCP server to be marked healthy');
+    } finally {
+      serverProcess.kill('SIGTERM');
+      cleanupTempDir(tempDir);
+    }
+  })) passed++; else failed++;
+
+  // Windows-only: child_process.spawn cannot resolve .cmd/.bat shims for
+  // bare PATH commands without an extension, and Node 18.20+/20.12+ refuse
+  // to spawn .cmd targets without `shell: true` (CVE-2024-27980). The probe
+  // must retry bare command names with platform extensions and route .cmd/.bat
+  // through the shell, otherwise tools like `npx` are misclassified as
+  // unhealthy on first use. Path-like commands keep single-candidate ENOENT
+  // semantics.
+  if (process.platform === 'win32') {
+    if (await asyncTest('windows: probes bare PATH commands via .cmd fallback', async () => {
+      const tempDir = createTempDir();
+      const binDir = path.join(tempDir, 'bin');
+      const configPath = path.join(tempDir, 'claude.json');
+      const statePath = path.join(tempDir, 'mcp-health.json');
+
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(binDir, 'winfallback.cmd'),
+        ['@echo off', 'node -e "setInterval(()=>{},1000)"', ''].join('\r\n')
+      );
+
+      try {
+        writeConfig(configPath, {
+          mcpServers: {
+            winfallback: {
+              command: 'winfallback',
+              args: []
+            }
+          }
+        });
+
+        const input = { tool_name: 'mcp__winfallback__list', tool_input: {} };
+        const result = runHook(input, {
+          CLAUDE_HOOK_EVENT_NAME: 'PreToolUse',
+          ECC_MCP_CONFIG_PATH: configPath,
+          ECC_MCP_HEALTH_STATE_PATH: statePath,
+          ECC_MCP_HEALTH_TIMEOUT_MS: '500',
+          PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`
+        });
+
+        assert.strictEqual(
+          result.code,
+          0,
+          `Expected bare command to be probed via .cmd fallback: ${hookFailureDetails(result, statePath)}`
+        );
+
+        const state = readState(statePath);
+        assert.strictEqual(
+          state.servers.winfallback.status,
+          'healthy',
+          'Expected bare command to be marked healthy via .cmd fallback'
+        );
+      } finally {
+        cleanupTempDir(tempDir);
+      }
+    })) passed++; else failed++;
+  } else {
+    console.log('  - skipped: windows: probes bare PATH commands via .cmd fallback (non-Windows)');
+  }
+
+  if (await asyncTest('probes command servers using non-absolute commands (e.g. npx) via PATH resolution', async () => {
+    const tempDir = createTempDir();
+    const configPath = path.join(tempDir, 'claude.json');
+    const statePath = path.join(tempDir, 'mcp-health.json');
+    const serverScript = path.join(tempDir, 'shell-server.js');
+
+    try {
+      // Create a server script that stays alive
+      fs.writeFileSync(serverScript, "setInterval(() => {}, 1000);\n");
+
+      // Use 'node' (non-absolute) as the command to exercise PATH-based
+      // resolution without depending on npx being available in the environment.
+      writeConfig(configPath, {
+        mcpServers: {
+          shelltest: {
+            command: 'node',
+            args: [serverScript]
+          }
+        }
+      });
+
+      const input = { tool_name: 'mcp__shelltest__ping', tool_input: {} };
+      const result = runHook(input, {
+        CLAUDE_HOOK_EVENT_NAME: 'PreToolUse',
+        ECC_MCP_CONFIG_PATH: configPath,
+        ECC_MCP_HEALTH_STATE_PATH: statePath,
+        ECC_MCP_HEALTH_TIMEOUT_MS: '100'
+      });
+
+      assert.strictEqual(result.code, 0, `Expected non-absolute command to resolve via PATH, got ${result.code}`);
+
+      const state = readState(statePath);
+      assert.strictEqual(state.servers.shelltest.status, 'healthy', 'Expected PATH-resolved server to be marked healthy');
+    } finally {
       cleanupTempDir(tempDir);
     }
   })) passed++; else failed++;

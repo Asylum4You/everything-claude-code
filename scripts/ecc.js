@@ -45,9 +45,21 @@ const COMMANDS = {
     script: 'status.js',
     description: 'Query the ECC SQLite state store status summary',
   },
+  'platform-audit': {
+    script: 'platform-audit.js',
+    description: 'Audit GitHub queues, discussions, roadmap, release, and security evidence',
+  },
+  'security-ioc-scan': {
+    script: 'ci/scan-supply-chain-iocs.js',
+    description: 'Scan dependency and AI-tool persistence surfaces for active supply-chain IOCs',
+  },
   sessions: {
     script: 'sessions-cli.js',
     description: 'List or inspect ECC sessions from the SQLite state store',
+  },
+  'work-items': {
+    script: 'work-items.js',
+    description: 'Track linked Linear, GitHub, handoff, and manual work items',
   },
   'session-inspect': {
     script: 'session-inspect.js',
@@ -73,7 +85,10 @@ const PRIMARY_COMMANDS = [
   'repair',
   'auto-update',
   'status',
+  'platform-audit',
+  'security-ioc-scan',
   'sessions',
+  'work-items',
   'session-inspect',
   'loop-status',
   'uninstall',
@@ -108,8 +123,14 @@ Examples:
   ecc repair --dry-run
   ecc auto-update --dry-run
   ecc status --json
+  ecc status --exit-code
+  ecc status --markdown --write status.md
+  ecc platform-audit --json --allow-untracked docs/drafts/
+  ecc security-ioc-scan --home
   ecc sessions
   ecc sessions session-active --json
+  ecc work-items upsert linear-ecc-20 --source linear --source-id ECC-20 --title "Review control-plane contract" --status blocked
+  ecc work-items sync-github --repo affaan-m/ECC
   ecc session-inspect claude:latest
   ecc loop-status --json
   ecc uninstall --target antigravity --dry-run

@@ -82,6 +82,14 @@ test('observe.sh touches observer activity marker on each observation', () => {
   assert.ok(content.includes('touch "$ACTIVITY_FILE"'), 'observe.sh should update activity marker during observation capture');
 });
 
+test('observe.sh avoids persistence-looking cleanup and lazy-start signatures', () => {
+  const content = fs.readFileSync(observeShPath, 'utf8');
+  assert.doesNotMatch(content, /\brm\s+-f\b/, 'observe.sh should avoid rm -f signatures that look destructive to security scanners');
+  assert.doesNotMatch(content, /\bnohup\b/, 'observe.sh should not launch the observer with nohup from the hook path');
+  assert.doesNotMatch(content, />\s*\/dev\/null\s+2>&1\s*&(?:\s|$)/, 'observe.sh should preserve lazy-start logs instead of suppressing output');
+  assert.ok(content.includes('_START_OBSERVER_LOGGED'), 'observe.sh should lazy-start through a logged helper');
+});
+
 // ──────────────────────────────────────────────────────
 // Test group 2: observer-loop.sh re-entrancy guard
 // ──────────────────────────────────────────────────────
@@ -96,7 +104,8 @@ test('observer-loop.sh defines ANALYZING guard variable', () => {
 test('on_usr1 checks ANALYZING before starting analysis', () => {
   const content = fs.readFileSync(observerLoopPath, 'utf8');
   assert.ok(content.includes('if [ "$ANALYZING" -eq 1 ]'), 'on_usr1 should check ANALYZING flag');
-  assert.ok(content.includes('Analysis already in progress, skipping signal'), 'on_usr1 should log when skipping due to re-entrancy');
+  assert.ok(content.includes('Analysis already in progress, deferring signal'), 'on_usr1 should log when deferring due to re-entrancy');
+  assert.ok(content.includes('PENDING_ANALYSIS=1'), 'on_usr1 should preserve re-entrant nudges for the next loop iteration');
 });
 
 test('on_usr1 sets ANALYZING=1 before and ANALYZING=0 after analysis', () => {
@@ -108,6 +117,15 @@ test('on_usr1 sets ANALYZING=1 before and ANALYZING=0 after analysis', () => {
   assert.ok(analyzeCall > 0, 'ANALYZING=1 should be set');
   assert.ok(analyzeObsCall > analyzeCall, 'analyze_observations should be called after ANALYZING=1');
   assert.ok(analyzeReset > analyzeObsCall, 'ANALYZING=0 should follow analyze_observations');
+});
+
+test('observer-loop checks pending analysis before sleeping', () => {
+  const content = fs.readFileSync(observerLoopPath, 'utf8');
+  assert.ok(/^PENDING_ANALYSIS=0$/m.test(content), 'PENDING_ANALYSIS should initialize to 0');
+  assert.ok(
+    /if \[ "\$PENDING_ANALYSIS" -eq 1 \]; then[\s\S]*?analyze_observations[\s\S]*?continue[\s\S]*?sleep "\$OBSERVER_INTERVAL_SECONDS"/.test(content),
+    'observer-loop should process deferred analysis before the interval sleep'
+  );
 });
 
 // ──────────────────────────────────────────────────────
@@ -334,8 +352,10 @@ test('observe.sh creates counter file and increments on each call', () => {
   // Create a minimal detect-project.sh that sets required vars
   const skillRoot = path.join(testDir, 'skill');
   const scriptsDir = path.join(skillRoot, 'scripts');
+  const scriptsLibDir = path.join(scriptsDir, 'lib');
   const hooksDir = path.join(skillRoot, 'hooks');
   fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.mkdirSync(scriptsLibDir, { recursive: true });
   fs.mkdirSync(hooksDir, { recursive: true });
 
   // Minimal detect-project.sh stub
@@ -348,6 +368,14 @@ test('observe.sh creates counter file and increments on each call', () => {
       `PROJECT_ROOT="${projectDir}"`,
       `PROJECT_DIR="${projectDir}"`,
       `CLV2_PYTHON_CMD="${process.platform === 'win32' ? 'python' : 'python3'}"`,
+      ''
+    ].join('\n')
+  );
+  fs.writeFileSync(
+    path.join(scriptsLibDir, 'homunculus-dir.sh'),
+    [
+      '#!/bin/bash',
+      '_ecc_resolve_homunculus_dir() { printf "%s\\n" "$HOME/.local/share/ecc-homunculus"; }',
       ''
     ].join('\n')
   );

@@ -769,6 +769,8 @@ function runTests() {
       'git diff --name-only',
       'git log --oneline --max-count=1',
       'git show HEAD:README.md',
+      'git show HEAD:"docs/install guide.md"',
+      '/usr/bin/git status --short',
       'git branch --show-current',
       'git rev-parse --abbrev-ref HEAD',
     ];
@@ -802,7 +804,20 @@ function runTests() {
     assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('current user request'));
   })) passed++; else failed++;
 
-  // --- Test 23: module-load pruning removes old state files only ---
+  // --- Test 23: quoted shell separators are not read-only git bypasses
+  clearState();
+  if (test('does not treat quoted shell separators as read-only git introspection', () => {
+    const result = runBashHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git show HEAD:"docs/a;b.md"' }
+    });
+    const output = parseOutput(result.stdout);
+    assert.ok(output, 'should produce valid JSON output');
+    assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('current user request'));
+  })) passed++; else failed++;
+
+  // --- Test 24: module-load pruning removes old state files only ---
   clearState();
   if (test('prunes stale state files while keeping fresh state files', () => {
     const staleFile = path.join(stateDir, 'state-stale-session.json');
@@ -979,6 +994,416 @@ function runTests() {
 
     assert.ok(!fs.existsSync(staleTmp), 'stale temp state file should be pruned');
     assert.ok(fs.existsSync(freshState), 'fresh state file should remain');
+  })) passed++; else failed++;
+
+  function runFreshSessionEdit(filePath, extra = {}) {
+    return runHook({
+      tool_name: 'Edit',
+      tool_input: { file_path: filePath, old_string: 'a', new_string: 'b' },
+      session_id: 'subagent-fresh-session',
+      ...extra
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+  }
+
+  function runFreshSessionBash(command, extra = {}) {
+    return runBashHook({
+      tool_name: 'Bash',
+      tool_input: { command },
+      session_id: 'subagent-fresh-session',
+      ...extra
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+  }
+
+  // --- Test 30: top-level Edit denies; subagent Edit allows ---
+  clearState();
+  if (test('A/B: same Edit denies at top level and allows with agent_id', () => {
+    const topLevel = runFreshSessionEdit('/src/subagent-edit.js');
+    const topOut = parseOutput(topLevel.stdout);
+    assert.ok(topOut, 'top-level edit should produce JSON output');
+    assert.strictEqual(topOut.hookSpecificOutput.permissionDecision, 'deny');
+
+    clearState();
+    const subagent = runFreshSessionEdit('/src/subagent-edit.js', { agent_id: 'agent-abc-123' });
+    const subOut = parseOutput(subagent.stdout);
+    assert.ok(subOut, 'subagent edit should produce JSON output');
+    assert.ok(!subOut.hookSpecificOutput || subOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'subagent edit should bypass the first-touch file gate');
+  })) passed++; else failed++;
+
+  // --- Test 31: top-level Write denies; subagent Write allows ---
+  clearState();
+  if (test('A/B: same Write denies at top level and allows with agent_id', () => {
+    const topLevel = runHook({
+      tool_name: 'Write',
+      tool_input: { file_path: '/src/subagent-write.js', content: 'module.exports = {};' },
+      session_id: 'subagent-fresh-session'
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+    const topOut = parseOutput(topLevel.stdout);
+    assert.ok(topOut, 'top-level write should produce JSON output');
+    assert.strictEqual(topOut.hookSpecificOutput.permissionDecision, 'deny');
+
+    clearState();
+    const subagent = runHook({
+      tool_name: 'Write',
+      tool_input: { file_path: '/src/subagent-write.js', content: 'module.exports = {};' },
+      session_id: 'subagent-fresh-session',
+      agent_id: 'agent-abc-123'
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+    const subOut = parseOutput(subagent.stdout);
+    assert.ok(subOut, 'subagent write should produce JSON output');
+    assert.ok(!subOut.hookSpecificOutput || subOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'subagent write should bypass the first-touch file gate');
+  })) passed++; else failed++;
+
+  // --- Test 32: top-level MultiEdit denies; subagent MultiEdit allows ---
+  clearState();
+  if (test('A/B: same MultiEdit denies at top level and allows with agent_id', () => {
+    const edits = [
+      { file_path: '/src/subagent-multi-a.js', old_string: 'a', new_string: 'b' },
+      { file_path: '/src/subagent-multi-b.js', old_string: 'c', new_string: 'd' }
+    ];
+
+    const topLevel = runHook({
+      tool_name: 'MultiEdit',
+      tool_input: { edits },
+      session_id: 'subagent-fresh-session'
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+    const topOut = parseOutput(topLevel.stdout);
+    assert.ok(topOut, 'top-level MultiEdit should produce JSON output');
+    assert.strictEqual(topOut.hookSpecificOutput.permissionDecision, 'deny');
+
+    clearState();
+    const subagent = runHook({
+      tool_name: 'MultiEdit',
+      tool_input: { edits },
+      session_id: 'subagent-fresh-session',
+      agent_id: 'agent-abc-123'
+    }, { CLAUDE_SESSION_ID: '', ECC_SESSION_ID: '' });
+    const subOut = parseOutput(subagent.stdout);
+    assert.ok(subOut, 'subagent MultiEdit should produce JSON output');
+    assert.ok(!subOut.hookSpecificOutput || subOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'subagent MultiEdit should bypass the first-touch file gate');
+  })) passed++; else failed++;
+
+  // --- Test 33: Bash stays gated inside subagents ---
+  clearState();
+  if (test('routine Bash remains gated in subagent context', () => {
+    const result = runFreshSessionBash('pwd', { agent_id: 'agent-abc-123' });
+    const output = parseOutput(result.stdout);
+    assert.ok(output, 'subagent Bash should produce JSON output');
+    assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('current user request'));
+  })) passed++; else failed++;
+
+  // --- Test 34: destructive Bash stays gated inside subagents ---
+  clearState();
+  if (test('destructive Bash remains gated in subagent context', () => {
+    const result = runFreshSessionBash('rm -rf /tmp/demo-path', { agent_id: 'agent-abc-123' });
+    const output = parseOutput(result.stdout);
+    assert.ok(output, 'subagent destructive Bash should produce JSON output');
+    assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny');
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('Destructive command detected'));
+  })) passed++; else failed++;
+
+  // --- Test 35: parent tool IDs also mark subagent context ---
+  clearState();
+  if (test('parent_tool_use_id and parentToolUseId mark subagent file edits', () => {
+    const snake = runFreshSessionEdit('/src/subagent-parent-snake.js', { parent_tool_use_id: 'toolu_parent_01' });
+    const snakeOut = parseOutput(snake.stdout);
+    assert.ok(snakeOut, 'snake-case parent marker should produce JSON output');
+    assert.ok(!snakeOut.hookSpecificOutput || snakeOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'parent_tool_use_id should bypass the first-touch file gate');
+
+    clearState();
+    const camel = runFreshSessionEdit('/src/subagent-parent-camel.js', { parentToolUseId: 'toolu_parent_02' });
+    const camelOut = parseOutput(camel.stdout);
+    assert.ok(camelOut, 'camel-case parent marker should produce JSON output');
+    assert.ok(!camelOut.hookSpecificOutput || camelOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'parentToolUseId should bypass the first-touch file gate');
+  })) passed++; else failed++;
+
+  // --- Test 36: only non-empty string markers count ---
+  clearState();
+  if (test('empty and non-string subagent markers do not bypass file gates', () => {
+    const cases = [
+      ['empty', { agent_id: '' }],
+      ['whitespace', { agent_id: '   ' }],
+      ['numeric', { agent_id: 12345 }],
+      ['null', { agent_id: null }]
+    ];
+
+    for (const [name, extra] of cases) {
+      clearState();
+      const result = runFreshSessionEdit(`/src/subagent-marker-${name}.js`, extra);
+      const output = parseOutput(result.stdout);
+      assert.ok(output, `${name} marker should produce JSON output`);
+      assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny',
+        `${name} marker should not bypass the first-touch file gate`);
+    }
+  })) passed++; else failed++;
+
+  // --- Test 37: two sequential subagent Edits on different files pass ---
+  clearState();
+  if (test('two sequential subagent Edits on different files both pass', () => {
+    const first = runFreshSessionEdit('/src/subagent-seq-a.js', { agent_id: 'agent-seq' });
+    const firstOut = parseOutput(first.stdout);
+    assert.ok(firstOut, 'first subagent edit should produce JSON output');
+    assert.ok(!firstOut.hookSpecificOutput || firstOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'first subagent edit should pass');
+
+    const second = runFreshSessionEdit('/src/subagent-seq-b.js', { agent_id: 'agent-seq' });
+    const secondOut = parseOutput(second.stdout);
+    assert.ok(secondOut, 'second subagent edit should produce JSON output');
+    assert.ok(!secondOut.hookSpecificOutput || secondOut.hookSpecificOutput.permissionDecision !== 'deny',
+      'second subagent edit should pass even on a new file');
+  })) passed++; else failed++;
+
+  // --- Shell-words tokenizer: bypasses the old regex missed ---
+
+  function expectDestructiveDeny(command, label) {
+    clearState();
+    const input = { tool_name: 'Bash', tool_input: { command } };
+    const result = runBashHook(input);
+    assert.strictEqual(result.code, 0, `${label}: exit code should be 0`);
+    const output = parseOutput(result.stdout);
+    assert.ok(output, `${label}: should produce JSON output`);
+    assert.strictEqual(output.hookSpecificOutput.permissionDecision, 'deny', `${label}: should deny`);
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes('Destructive'),
+      `${label}: reason should mention "Destructive"`);
+  }
+
+  function expectAllow(command, label) {
+    clearState();
+    writeState({ checked: ['__bash_session__'], last_active: Date.now() });
+    const input = { tool_name: 'Bash', tool_input: { command } };
+    const result = runBashHook(input);
+    assert.strictEqual(result.code, 0, `${label}: exit code should be 0`);
+    const output = parseOutput(result.stdout);
+    assert.ok(output, `${label}: should produce JSON output`);
+    if (output.hookSpecificOutput) {
+      assert.notStrictEqual(output.hookSpecificOutput.permissionDecision, 'deny', `${label}: should not deny`);
+    } else {
+      assert.strictEqual(output.tool_name, 'Bash', `${label}: pass-through should preserve input`);
+    }
+  }
+
+  if (test('denies short-form git push -f as destructive', () => {
+    expectDestructiveDeny('git push -f origin main', 'git push -f');
+  })) passed++; else failed++;
+
+  if (test('denies git reset --hard even with intervening -c global option', () => {
+    expectDestructiveDeny('git -c core.foo=bar reset --hard', 'git -c ... reset --hard');
+  })) passed++; else failed++;
+
+  if (test('denies rm -fr (reverse flag order)', () => {
+    expectDestructiveDeny('rm -fr /tmp/junk', 'rm -fr');
+  })) passed++; else failed++;
+
+  if (test('denies rm -r -f (split flag form)', () => {
+    expectDestructiveDeny('rm -r -f /tmp/junk', 'rm -r -f');
+  })) passed++; else failed++;
+
+  if (test('denies rm --recursive --force (long flag form)', () => {
+    expectDestructiveDeny('rm --recursive --force /tmp/junk', 'rm --recursive --force');
+  })) passed++; else failed++;
+
+  if (test('denies git reset HEAD --hard (with intervening ref)', () => {
+    expectDestructiveDeny('git reset HEAD --hard', 'git reset HEAD --hard');
+  })) passed++; else failed++;
+
+  if (test('denies git clean -fd (combined force+dirs flag)', () => {
+    expectDestructiveDeny('git clean -fd', 'git clean -fd');
+  })) passed++; else failed++;
+
+  if (test('denies destructive command in second chained segment', () => {
+    expectDestructiveDeny('echo y | rm -rf /tmp/junk', 'echo y | rm -rf');
+  })) passed++; else failed++;
+
+  if (test('denies destructive command inside command substitution', () => {
+    expectDestructiveDeny('echo $(rm -rf /tmp/junk)', 'rm -rf inside $()');
+  })) passed++; else failed++;
+
+  if (test('denies destructive command inside backticks', () => {
+    expectDestructiveDeny('echo `git push -f origin main`', 'git push -f inside backticks');
+  })) passed++; else failed++;
+
+  if (test('allows destructive phrase quoted inside a commit message', () => {
+    expectAllow('git commit -m "fix: rm -rf race in worker"', 'rm -rf in -m');
+  })) passed++; else failed++;
+
+  if (test('allows SQL phrase quoted inside a commit message', () => {
+    expectAllow('git commit -m "docs: explain when drop table is safe"', 'drop table in -m');
+  })) passed++; else failed++;
+
+  if (test('allows git push --force-if-includes as a safety-checked variant', () => {
+    expectAllow('git push --force-with-lease --force-if-includes origin main',
+      'git push --force-if-includes');
+  })) passed++; else failed++;
+
+  // --- Review-round-2 findings ---
+
+  if (test('denies git push --force even with --force-if-includes present', () => {
+    expectDestructiveDeny('git push --force --force-if-includes origin main',
+      'git push --force --force-if-includes');
+  })) passed++; else failed++;
+
+  if (test('denies git push when bare --force is mixed with lease flags', () => {
+    expectDestructiveDeny('git push --force-with-lease --force origin main',
+      'git push --force-with-lease --force');
+  })) passed++; else failed++;
+
+  if (test('denies git push with +refspec prefix (bare branch)', () => {
+    expectDestructiveDeny('git push origin +main', 'git push origin +main');
+  })) passed++; else failed++;
+
+  if (test('denies git push with +refspec prefix (full ref)', () => {
+    expectDestructiveDeny('git push origin +refs/heads/main:refs/heads/main',
+      'git push origin +refs/heads/main:refs/heads/main');
+  })) passed++; else failed++;
+
+  if (test('denies git switch --discard-changes', () => {
+    expectDestructiveDeny('git switch --discard-changes feature',
+      'git switch --discard-changes');
+  })) passed++; else failed++;
+
+  if (test('denies git switch --force', () => {
+    expectDestructiveDeny('git switch --force main', 'git switch --force');
+  })) passed++; else failed++;
+
+  if (test('denies git switch -f short form', () => {
+    expectDestructiveDeny('git switch -f main', 'git switch -f');
+  })) passed++; else failed++;
+
+  if (test('denies git switch -C force-create', () => {
+    expectDestructiveDeny('git switch -C feature', 'git switch -C');
+  })) passed++; else failed++;
+
+  if (test('still allows plain git switch', () => {
+    expectAllow('git switch feature', 'git switch feature');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf nested inside a backtick subshell', () => {
+    expectDestructiveDeny('echo y | `rm -rf /tmp/junk`',
+      'backtick subshell');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf nested inside a $(...) subshell', () => {
+    expectDestructiveDeny('echo y | $(rm -rf /tmp/junk)',
+      'dollar-paren subshell');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf inside double-quoted command substitution', () => {
+    expectDestructiveDeny('echo "$(rm -rf /tmp/junk)"',
+      'double-quoted dollar-paren subshell');
+  })) passed++; else failed++;
+
+  // --- Subshell + brace-group bypass coverage ---
+  // Destructive commands inside `(...)` and `{ ...; }` execute the
+  // same way they do at the top level, so the destructive classifier
+  // must see inside those bodies too. Nested parens `((...))` are
+  // arithmetic-evaluation syntax in bash (not a nested subshell), but
+  // our parser depth-tracks them conservatively — i.e. the inner
+  // tokens are still scanned for destructive intent. That's safety
+  // over precision and the right default for this gate.
+
+  if (test('denies rm -rf inside plain (...) subshell group', () => {
+    expectDestructiveDeny('(rm -rf /tmp/junk)', 'plain subshell group');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf inside ((...)) — arithmetic eval, treated conservatively', () => {
+    expectDestructiveDeny('((rm -rf /tmp/junk))', 'arithmetic-eval parens');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf inside { ...; } brace group', () => {
+    expectDestructiveDeny('{ rm -rf /tmp/junk; }', 'brace group');
+  })) passed++; else failed++;
+
+  if (test('denies git push --force inside plain (...) subshell group', () => {
+    expectDestructiveDeny('(git push --force origin main)',
+      'git-force in subshell');
+  })) passed++; else failed++;
+
+  if (test('denies git push --force inside { ...; } brace group', () => {
+    expectDestructiveDeny('{ git push --force origin main; }',
+      'git-force in brace group');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf nested across () and {} (cross-syntax)', () => {
+    expectDestructiveDeny('(echo y; { rm -rf /tmp/junk; })',
+      '() containing {} cross-syntax');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf nested across $() and () (cross-syntax)', () => {
+    expectDestructiveDeny('$(echo y; (rm -rf /tmp/junk))',
+      '$() containing () cross-syntax');
+  })) passed++; else failed++;
+
+  // Negative cases — literals and non-destructive commands must NOT
+  // be promoted to destructive by the new grouping-body walker.
+
+  if (test('allows literal (rm -rf ...) inside single quotes', () => {
+    expectAllow("git commit -m '(rm -rf /tmp/junk)'",
+      'single-quoted subshell literal');
+  })) passed++; else failed++;
+
+  if (test('allows literal (rm -rf ...) inside double quotes', () => {
+    expectAllow('echo "(rm -rf /tmp/junk)"',
+      'double-quoted subshell literal');
+  })) passed++; else failed++;
+
+  if (test('allows literal { rm -rf ...; } inside double quotes', () => {
+    expectAllow('echo "{ rm -rf /tmp/junk; }"',
+      'double-quoted brace-group literal');
+  })) passed++; else failed++;
+
+  if (test('allows non-destructive (echo hello)', () => {
+    expectAllow('(echo hello)', 'non-destructive subshell');
+  })) passed++; else failed++;
+
+  if (test('allows non-destructive { echo hello; }', () => {
+    expectAllow('{ echo hello; }', 'non-destructive brace group');
+  })) passed++; else failed++;
+
+  if (test('allows {rm -rf} — no space after { is not a brace group', () => {
+    // bash treats `{rm` as a single token; no destructive intent
+    // can be statically derived from this form, and the command
+    // would not actually run rm at runtime either.
+    expectAllow('echo {rm -rf /tmp/junk}',
+      'no-space brace literal');
+  })) passed++; else failed++;
+
+  // --- Round 1 review fixes: brace-group span-skip + boundary ---
+  // Verifies the body-accumulation loop in `extractBraceGroups`
+  // correctly walks past `$(...)`, `(...)`, and backtick spans so
+  // a `}` inside one of those does not terminate the brace group
+  // early, plus the nested `{` boundary rule.
+
+  if (test('denies rm -rf in brace group with backtick containing }', () => {
+    expectDestructiveDeny('{ echo `echo }`; rm -rf /tmp/junk; }',
+      'brace + backtick containing }');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf in brace group with $() containing }', () => {
+    expectDestructiveDeny('{ echo $(echo "}"); rm -rf /tmp/junk; }',
+      'brace + $() containing }');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf in brace group with nested () containing }', () => {
+    expectDestructiveDeny('{ (echo "}"); rm -rf /tmp/junk; }',
+      'brace + () containing }');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf in brace group with $() body containing }', () => {
+    expectDestructiveDeny('{ x=$(echo a}b); rm -rf /tmp/junk; }',
+      'brace + $() body with }');
+  })) passed++; else failed++;
+
+  if (test('denies rm -rf when token like foo{ appears before brace group close', () => {
+    // tokens like `foo{` are not reserved-word `{` (no boundary,
+    // no whitespace after) — must not bump nested-depth and so
+    // must not delay brace-group close
+    expectDestructiveDeny('{ echo foo{bar; rm -rf /tmp/junk; }',
+      'foo{ token inside brace body');
   })) passed++; else failed++;
 
   // Cleanup only the temp directory created by this test file.
