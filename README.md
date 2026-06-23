@@ -2,6 +2,11 @@
 
 ![ECC — the agent harness operating system](assets/hero.png)
 
+[![Discord](https://img.shields.io/discord/1496644400590094540?logo=discord&logoColor=white&label=Join%20the%20Discord&color=5865F2)](https://discord.gg/36yGMHGFbR)
+[![Website](https://img.shields.io/badge/Website-ecc.tools-E07856?logo=googlechrome&logoColor=white)](https://ecc.tools)
+[![GitHub App](https://img.shields.io/badge/GitHub%20App-ECC%20Tools-181717?logo=github&logoColor=white)](https://github.com/apps/ecc-tools)
+[![Guides](https://img.shields.io/badge/Guides-Start%20here-1f6feb?logo=readme&logoColor=white)](#the-guides)
+
 [![Stars](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.ecc.tools%2Fbadge%2Fstars&style=flat)](https://github.com/affaan-m/ECC/stargazers)
 [![Forks](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.ecc.tools%2Fbadge%2Fforks&style=flat)](https://github.com/affaan-m/ECC/network/members)
 [![Contributors](https://img.shields.io/github/contributors/affaan-m/ECC?style=flat)](https://github.com/affaan-m/ECC/graphs/contributors)
@@ -17,7 +22,10 @@
 ![Perl](https://img.shields.io/badge/-Perl-39457E?logo=perl&logoColor=white)
 ![Markdown](https://img.shields.io/badge/-Markdown-000000?logo=markdown&logoColor=white)
 
-> **211.9K+ stars** | **32.5K+ forks** | **230+ contributors** | **12+ language ecosystems** | **Cross-harness agent workflows**
+> [!WARNING]
+> **Official sources only.** Install ECC only from verified channels: the GitHub repository [github.com/affaan-m/ECC](https://github.com/affaan-m/ECC), the npm packages [`ecc-universal`](https://www.npmjs.com/package/ecc-universal) and [`ecc-agentshield`](https://www.npmjs.com/package/ecc-agentshield), the [GitHub App](https://github.com/apps/ecc-tools), the plugin slug `ecc@ecc`, and the project website [ecc.tools](https://ecc.tools). Third-party re-uploads and unofficial mirrors are not maintained or reviewed by the project and may contain malware.
+
+**211.9K+ stars** | **32.5K+ forks** | **230+ contributors** | **12+ language ecosystems** | **Cross-harness agent workflows**
 
 ---
 
@@ -92,6 +100,12 @@ ECC v2.0.0 adds the public Hermes operator story on top of that reusable layer: 
     <strong>Greptile</strong>
   </a>
 </td>
+<td align="center" width="220">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=ECC">
+    <img src="assets/images/sponsors/atlascloud.png" width="96" alt="Atlas Cloud logo" /><br />
+    <strong>Atlas Cloud</strong>
+  </a>
+</td>
 </tr>
 </table>
 
@@ -154,7 +168,7 @@ Stable graduation of the 2.0 line: 261 skills, the control-pane substrate (sessi
 ### v2.0.0-rc.1 — Surface Refresh, Operator Workflows, and ECC 2.0 Alpha (Apr 2026)
 
 - **Dashboard GUI** — New Tkinter-based desktop application (`ecc_dashboard.py` or `npm run dashboard`) with dark/light theme toggle, font customization, and project logo in header and taskbar.
-- **Public surface synced to the live repo** — metadata, catalog counts, plugin manifests, and install-facing docs now match the actual OSS surface: 64 agents, 262 skills, and 84 legacy command shims.
+- **Public surface synced to the live repo** — metadata, catalog counts, plugin manifests, and install-facing docs now match the actual OSS surface: 66 agents, 268 skills, and 84 legacy command shims.
 - **Operator and outbound workflow expansion** — `brand-voice`, `social-graph-ranker`, `connections-optimizer`, `customer-billing-ops`, `ecc-tools-cost-audit`, `google-workspace-ops`, `project-flow-ops`, and `workspace-surface-audit` round out the operator lane.
 - **Media and launch tooling** — `manim-video`, `remotion-video-creation`, and upgraded social publishing surfaces make technical explainers and launch content part of the same system.
 - **Framework and product surface growth** — `nestjs-patterns`, richer Codex/OpenCode install surfaces, and expanded cross-harness packaging keep the repo usable beyond Claude Code alone.
@@ -425,7 +439,7 @@ If you stacked methods, clean up in this order:
 /plugin list ecc@ecc
 ```
 
-**That's it!** You now have access to 64 agents, 262 skills, and 84 legacy command shims.
+**That's it!** You now have access to 67 agents, 271 skills, and 92 legacy command shims.
 
 ### Dashboard GUI
 
@@ -555,7 +569,7 @@ ECC/
 |   |-- plugin.json         # Plugin metadata and component paths
 |   |-- marketplace.json    # Marketplace catalog for /plugin marketplace add
 |
-|-- agents/           # 64 specialized subagents for delegation
+|-- agents/           # 67 specialized subagents for delegation
 |   |-- planner.md           # Feature implementation planning
 |   |-- architect.md         # System design decisions
 |   |-- tdd-guide.md         # Test-driven development
@@ -1390,10 +1404,15 @@ The repo also exposes a Codex repo-scoped marketplace (`.agents/plugins/marketpl
 
 ```bash
 codex plugin marketplace add affaan-m/ECC
-codex plugin list   # ecc@ecc should appear
+codex plugin list
+node scripts/codex/check-plugin-cache.js
 ```
 
-**Plugin mode is currently fragile on Codex.** Marketplace discovery and install work with this layout, but runtime skill loading from local/repo marketplaces is still unreliable upstream ([openai/codex#26037](https://github.com/openai/codex/issues/26037)): Codex copies only the plugin folder into its install cache, so plugins that reference shared repo content may not expose skills in a fresh session. Until that settles, treat the plugin path as experimental and prefer the manual sync flow above (`scripts/sync-ecc-to-codex.sh`), which is the supported Codex route. See [#2128](https://github.com/affaan-m/ECC/issues/2128) for the full investigation.
+`codex plugin list` only confirms marketplace registration. Run
+`node scripts/codex/check-plugin-cache.js` after install to verify that the
+installed cache can resolve the manifest's skills, MCP config, and assets.
+
+**Plugin mode is currently fragile on Codex.** Marketplace discovery and install work with this layout, but runtime skill loading from local/repo marketplaces is still unreliable upstream ([openai/codex#26037](https://github.com/openai/codex/issues/26037)): Codex copies only the plugin folder into its install cache, so plugins that reference shared repo content may not expose skills in a fresh session. If the cache health check reports missing manifest references, treat the plugin path as discovery-only and prefer the manual sync flow above (`scripts/sync-ecc-to-codex.sh`), which is the supported Codex route. See [#2128](https://github.com/affaan-m/ECC/issues/2128) for the full investigation.
 
 ### What's Included
 
@@ -1507,9 +1526,9 @@ The configuration is automatically detected from `.opencode/opencode.json`.
 
 | Feature | Claude Code         | OpenCode | Status |
 |---------|---------------------|----------|--------|
-| Agents | PASS: 64 agents     | PASS: 12 agents | **Claude Code leads** |
-| Commands | PASS: 84 commands   | PASS: 35 commands | **Claude Code leads** |
-| Skills | PASS: 262 skills    | PASS: 37 skills | **Claude Code leads** |
+| Agents | PASS: 67 agents     | PASS: 12 agents | **Claude Code leads** |
+| Commands | PASS: 92 commands   | PASS: 35 commands | **Claude Code leads** |
+| Skills | PASS: 271 skills    | PASS: 37 skills | **Claude Code leads** |
 | Hooks | PASS: 8 event types | PASS: 11 events | **OpenCode has more!** |
 | Rules | PASS: 29 rules      | PASS: 13 instructions | **Claude Code leads** |
 | MCP Servers | PASS: 14 servers    | PASS: Full | **Full parity** |
@@ -1668,9 +1687,9 @@ ECC is the **first plugin to maximize every major AI coding tool**. Here's how e
 
 | Feature | Claude Code           | Cursor IDE | Codex CLI | OpenCode | GitHub Copilot |
 |---------|-----------------------|------------|-----------|----------|----------------|
-| **Agents** | 64                    | Shared (AGENTS.md) | Shared (AGENTS.md) | 12 | N/A |
-| **Commands** | 84                    | Shared | Instruction-based | 35 | 5 prompts |
-| **Skills** | 262                   | Shared | 10 (native format) | 37 | Via instructions |
+| **Agents** | 67                    | Shared (AGENTS.md) | Shared (AGENTS.md) | 12 | N/A |
+| **Commands** | 92                    | Shared | Instruction-based | 35 | 5 prompts |
+| **Skills** | 271                   | Shared | 10 (native format) | 37 | Via instructions |
 | **Hook Events** | 8 types               | 15 types | None yet | 11 types | None |
 | **Hook Scripts** | 20+ scripts           | 16 scripts (DRY adapter) | N/A | Plugin hooks | N/A |
 | **Rules** | 34 (common + lang)    | 34 (YAML frontmatter) | Instruction-based | 13 instructions | 1 always-on file |
@@ -1797,6 +1816,17 @@ These configs work for my workflow. You should:
 2. Modify for your stack
 3. Remove what you don't use
 4. Add your own patterns
+
+---
+
+## Security
+
+ECC takes supply-chain and agent safety seriously.
+
+- **Official sources only.** Install ECC only from the verified channels listed in the banner at the top of this README — the [GitHub repo](https://github.com/affaan-m/ECC), the `ecc-universal` / `ecc-agentshield` npm packages, the [GitHub App](https://github.com/apps/ecc-tools), the plugin slug `ecc@ecc`, and [ecc.tools](https://ecc.tools). Third-party re-uploads and mirrors are unreviewed and may ship malware.
+- **Report a vulnerability.** Use the private process in [SECURITY.md](SECURITY.md) (GitHub private vulnerability reporting). Please do not open public issues for security reports.
+- **Built-in guardrails.** GateGuard gates destructive shell commands (including `rm`, force/path `git checkout`, and destructive `find -exec`) before they run; the supply-chain IOC scanner runs in CI; and [AgentShield](#agentshield--security-auditor) audits your own agent, hook, MCP, permission, and secret surfaces (`/security-scan`).
+- **Deep dive.** See the [Security Guide](./the-security-guide.md).
 
 ---
 
